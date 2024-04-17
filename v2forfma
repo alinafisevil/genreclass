@@ -1,0 +1,82 @@
+import os
+import librosa
+import json
+import math
+import pandas as pd
+
+JSON_PATH = "data_3.mfcc.json"
+MP3_PATH = "/content/drive/MyDrive/fma/data/fma_small 2/"
+TRACK_CSV = "/content/drive/MyDrive/fma/data/fma_metadata/tracks1.csv"
+SAMPLE_RATE = 22050
+TRACK_DURATION = 30  # measured in seconds
+SAMPLES_PER_TRACK = SAMPLE_RATE * TRACK_DURATION
+
+
+def save_mfcc(dataset_path, json_path, num_mfcc=13, n_fft=2048, hop_length=512, num_segments=5):
+    data = {
+        "mapping": [],
+        "labels": [],
+        "mfcc": []
+    }
+
+
+    samples_per_segment = int(SAMPLES_PER_TRACK / num_segments)
+    num_mfcc_vectors_per_segment = math.ceil(samples_per_segment / hop_length)
+
+    tracks = pd.read_csv(TRACK_CSV, index_col=0, header=[0, 1])
+    keep_cols = [('track', 'genre_top'), ('set', 'subset')]
+
+    df_all = tracks[keep_cols]
+    df_all = df_all[df_all[('set', 'subset')] == 'small']
+
+    for i, row in df_all.iterrows():
+    # save genre label in the mapping
+        semantic_label = row[('track', 'genre_top')]
+        data["mapping"].append(semantic_label)
+        print("\nProcessing: {}".format(semantic_label))
+
+        f = get_song_from(MP3_PATH, i)
+
+        file_path = get_song_file_path(MP3_PATH, i) + get_padded_name(i) + '.mp3'
+
+        signal, sample_rate = librosa.load(file_path, sr=SAMPLE_RATE)
+
+        for d in range(num_segments):
+            start = samples_per_segment * d
+            finish = start + samples_per_segment
+
+            mfcc = librosa.feature.mfcc(y=signal[start:finish],
+                                        sr=sample_rate, n_mfcc=num_mfcc,
+                                        n_fft=n_fft, hop_length=hop_length)
+            mfcc = mfcc.T
+
+            if len(mfcc) == num_mfcc_vectors_per_segment:
+                data["mfcc"].append(mfcc.tolist())
+                data["labels"].append(i)
+                print("{}, segment:{}".format(file_path, d + 1))
+
+        with open(json_path, "w") as fp:
+          json.dump(data, fp, indent=4)
+
+
+def get_song_from(directory, song_name):
+    directory = get_song_file_path(directory, song_name)
+    for file in os.listdir(directory):
+        if not file.endswith(".mp3"):
+            continue
+        if file == get_padded_name(song_name) + ".mp3" and os.path.isfile(os.path.join(directory, file)):
+            return file
+    return None
+
+
+def get_song_file_path(directory, song_name):
+      padded_song_name = get_padded_name(song_name)
+      directory = directory + padded_song_name[:3] + "/"
+      return directory
+
+
+def get_padded_name(song_name):
+      return str(song_name).zfill(6)
+
+if __name__ == "__main__":
+    save_mfcc(DATASET_PATH, JSON_PATH, num_segments=1)
